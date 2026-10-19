@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ward Telemetry Replay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --paper: #fbf3f0; --grid-minor: #f2dcd6; --grid-major: #e6b9b0; --panel: #fffaf8;
+  --ink: #1b2540; --ink-2: #545d72; --muted: #8a8f9c; --rule-line: #e3d3cf;
+  --normal: #0f8a3c; --warning: #fab219; --warning-ink: #9a6400; --critical: #d03b3b; --fault: #6250d6;
+  --trace: #1b2540; --focus: #2a78d6;
+  --display: "Barlow Condensed", "Arial Narrow", sans-serif; --body: "Public Sans", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --paper: #10151f; --grid-minor: #1a2230; --grid-major: #263246; --panel: #151c28;
+  --ink: #e9edf5; --ink-2: #aab3c5; --muted: #7c8598; --rule-line: #263246;
+  --warning-ink: #fab219; --critical: #ef5a5a; --fault: #9085e9; --normal: #2fbf63; --trace: #7fe3a3; --focus: #6da7ec;
+} }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.5 var(--body); }
+.wrap { max-width: 1280px; margin: 0 auto; padding: 20px 16px 40px; }
+header { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 32px; justify-content: space-between; padding-bottom: 14px; border-bottom: 2px solid var(--ink); }
+h1 { font: 700 clamp(30px, 4.4vw, 46px)/1 var(--display); margin: 0; letter-spacing: -0.01em; }
+header p { margin: 6px 0 0; color: var(--ink-2); max-width: 60ch; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button, select { font: 600 15px var(--body); color: var(--ink); background: var(--panel); border: 1.5px solid var(--ink); border-radius: 6px; padding: 7px 14px; cursor: pointer; }
+button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.patients { display: flex; flex-wrap: wrap; gap: 6px; margin: 16px 0 4px; align-items: center; }
+.patients span { color: var(--ink-2); margin-right: 6px; }
+.patients button { padding: 4px 11px; font-family: var(--display); font-size: 18px; border-radius: 4px; }
+
+.monitor { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; margin-top: 16px; }
+.strip { position: relative; border: 1.5px solid var(--grid-major); border-radius: 4px; height: 420px;
+  background-color: var(--paper);
+  background-image: linear-gradient(var(--grid-major) 1px, transparent 1px), linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
+    linear-gradient(var(--grid-minor) 1px, transparent 1px), linear-gradient(90deg, var(--grid-minor) 1px, transparent 1px);
+  background-size: 50px 50px, 50px 50px, 10px 10px, 10px 10px; }
+.strip canvas, .overview canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.readouts { display: flex; flex-direction: column; gap: 10px; }
+.vital { background: var(--panel); border-left: 4px solid var(--ink); padding: 8px 14px 10px; }
+.vital .name { color: var(--ink-2); font-size: 13px; }
+.vital .num { font: 600 64px/0.95 var(--display); font-variant-numeric: tabular-nums; }
+.vital .num small { font-size: 20px; color: var(--ink-2); margin-left: 4px; }
+.vital.secondary .num { font-size: 40px; }
+.verdicts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.verdict { padding: 8px 10px; border: 1.5px solid var(--rule-line); border-radius: 4px; background: var(--panel); }
+.verdict .who { font-size: 12px; color: var(--ink-2); }
+.state { font: 700 20px/1.2 var(--display); display: flex; align-items: center; gap: 6px; }
+.dot { width: 11px; height: 11px; border-radius: 50%; flex: none; }
+.c0 { --c: var(--normal); } .c1 { --c: var(--warning); } .c2 { --c: var(--critical); } .c3 { --c: var(--fault); }
+.dot { background: var(--c); } .c2 .state-text, .state.c2 { color: var(--critical); }
+.flash { animation: flash 0.9s ease-out; }
+@keyframes flash { from { background: color-mix(in srgb, var(--c) 35%, var(--panel)); } }
+
+.timeline { margin-top: 18px; }
+.overview { position: relative; height: 96px; border: 1.5px solid var(--grid-major); border-radius: 4px; background: var(--panel); }
+.timeline input[type=range] { width: 100%; margin: 8px 0 0; accent-color: var(--ink); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--ink-2); font-size: 13px; margin-top: 6px; }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; background: var(--c); }
+.legend i.hollow { background: none; border: 2px solid var(--ink-2); }
+
+.lower { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; margin-top: 28px; }
+h2 { font: 700 26px/1.1 var(--display); margin: 0 0 4px; }
+.sub { color: var(--ink-2); margin: 0 0 12px; font-size: 14px; }
+.tally { display: flex; gap: 24px; margin-bottom: 10px; }
+.tally div { font-size: 13px; color: var(--ink-2); }
+.tally b { display: block; font: 600 34px/1 var(--display); color: var(--ink); }
+.log { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow: auto; border-top: 1.5px solid var(--ink); }
+.log li { display: grid; grid-template-columns: 64px 44px 1fr auto; gap: 10px; align-items: center; padding: 7px 4px; border-bottom: 1px solid var(--rule-line); font-size: 14px; }
+.log time { font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.log .src { font-weight: 600; }
+.log .ok { color: var(--normal); } .log .bad { color: var(--critical); }
+.log .empty { display: block; color: var(--ink-2); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 7px 6px; border-bottom: 1px solid var(--rule-line); }
+th:first-child, td:first-child { text-align: left; }
+thead th { border-bottom: 1.5px solid var(--ink); color: var(--ink-2); font-weight: 600; font-size: 12.5px; }
+tr.best td { font-weight: 600; background: color-mix(in srgb, var(--normal) 9%, transparent); }
+.facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
+.facts div { font-size: 13px; color: var(--ink-2); border-top: 2px solid var(--ink); padding-top: 6px; }
+.facts b { display: block; font: 600 30px/1.1 var(--display); color: var(--ink); }
+footer { margin-top: 32px; color: var(--muted); font-size: 13px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+@media (max-width: 900px) {
+  .monitor, .lower { grid-template-columns: 1fr; }
+  .readouts { display: grid; grid-template-columns: 1fr 1fr 1fr; }
+  .verdicts { grid-column: 1 / -1; }
+  .vital .num { font-size: 40px; } .vital.secondary .num { font-size: 32px; }
+  .strip { height: 330px; }
+}
+@media (max-width: 520px) { .readouts { grid-template-columns: 1fr 1fr; } .facts { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Ward telemetry replay</h1>
+      <p>Wearable vitals from patients the model never saw in training, streamed one sample every 10 seconds. The AI and a textbook threshold rule watch the same stream and raise alerts with the same persistence logic.</p>
+    </div>
+    <div class="controls">
+      <button id="play" aria-pressed="false">Pause</button>
+      <label class="sr" for="speed">Playback speed</label>
+      <select id="speed">
+        <option value="30">30× speed</option>
+        <option value="120" selected>120× speed</option>
+        <option value="600">600× speed</option>
+      </select>
+    </div>
+  </header>
+
+  <nav class="patients" aria-label="Choose patient"><span>Patient</span></nav>
+
+  <section class="monitor" aria-label="Live monitor">
+    <div class="strip" role="img" aria-label="Last hour of heart rate, temperature and motion"><canvas id="strip"></canvas></div>
+    <div class="readouts">
+      <div class="vital"><div class="name">Heart rate</div><div class="num"><span id="hr">--</span><small>bpm</small></div></div>
+      <div class="vital secondary"><div class="name">Body temperature</div><div class="num"><span id="temp">--</span><small>°C</small></div></div>
+      <div class="vital secondary"><div class="name">Motion index</div><div class="num"><span id="motion">--</span></div></div>
+      <div class="verdicts">
+        <div class="verdict" id="v-ai"><div class="who">AI model says</div><div class="state"><span class="dot"></span><span class="state-text">--</span></div></div>
+        <div class="verdict" id="v-rule"><div class="who">Threshold rule says</div><div class="state"><span class="dot"></span><span class="state-text">--</span></div></div>
+        <div class="verdict" id="v-truth" style="grid-column: 1 / -1"><div class="who">Ground truth (simulator label)</div><div class="state"><span class="dot"></span><span class="state-text">--</span></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="timeline" aria-label="Full six-hour recording">
+    <div class="overview"><canvas id="overview"></canvas></div>
+    <label class="sr" for="scrub">Seek</label>
+    <input id="scrub" type="range" min="5" max="2159" value="5">
+    <div class="legend">
+      <span><i class="c1"></i>Warning</span><span><i class="c2"></i>Critical</span><span><i class="c3"></i>Sensor fault</span>
+      <span>Top ticks: AI alerts. Bottom ticks: rule alerts.</span><span><i class="hollow"></i>False alarm (patient was normal)</span>
+    </div>
+  </section>
+
+  <section class="lower">
+    <div>
+      <h2>Alerts so far</h2>
+      <p class="sub">Every alert raised up to the playhead, checked against the simulator's ground truth.</p>
+      <div class="tally">
+        <div><b id="t-ai">0</b>AI alerts</div><div><b id="t-ai-f">0</b>AI false alarms</div>
+        <div><b id="t-rule">0</b>Rule alerts</div><div><b id="t-rule-f">0</b>Rule false alarms</div>
+      </div>
+      <ul class="log" id="log" aria-live="polite"></ul>
+    </div>
+    <div>
+      <h2>How the models compare</h2>
+      <p class="sub">Held-out evaluation on all 10 test patients (60 hours, 21,550 windows).</p>
+      <table>
+        <thead><tr><th>Model</th><th>Accuracy</th><th>Macro F1</th><th>False alarms / h</th><th>Critical events caught</th></tr></thead>
+        <tbody id="models"></tbody>
+      </table>
+      <div class="facts" id="facts"></div>
+    </div>
+  </section>
+  <footer>Simulated data. Metrics are optimistic and are not clinical evidence. Built with scikit-learn; replay generated by export_dashboard.py.</footer>
+</div>
+
+<script src="data.js"></script>
+<script>
+const NAMES = ['Normal', 'Warning', 'Critical', 'Sensor fault'];
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const ids = Object.keys(PATIENTS), WIN = 360, N = 2160;   // visible window: 1 hour of 10 s samples
+let P, pid, t = 5, playing = !matchMedia('(prefers-reduced-motion: reduce)').matches, last = 0, acc = 0;
+const $ = id => document.getElementById(id);
+const clock = i => { const s = i * 10; return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
+const color = c => css(['--normal', '--warning', '--critical', '--fault'][c]);
+
+// patient chips
+const nav = document.querySelector('.patients');
+ids.forEach(id => { const b = document.createElement('button'); b.textContent = id; b.setAttribute('aria-pressed', 'false');
+  b.onclick = () => load(id); nav.appendChild(b); });
+function load(id) {
+  pid = id; P = PATIENTS[id]; t = 5;
+  nav.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.textContent === id));
+  drawOverview(); render(true);
+}
+
+function sized(cv) { const r = cv.getBoundingClientRect(), d = devicePixelRatio || 1;
+  if (cv.width !== Math.round(r.width * d)) { cv.width = Math.round(r.width * d); cv.height = Math.round(r.height * d); }
+  const g = cv.getContext('2d'); g.setTransform(d, 0, 0, d, 0, 0); g.clearRect(0, 0, r.width, r.height); return [g, r.width, r.height]; }
+
+function bands(g, x0, xw, y, h, from, to) {   // shade ground-truth episodes
+  for (let i = from; i < to; i++) { const c = P.label[i]; if (!c) continue;
+    g.fillStyle = color(c); g.globalAlpha = 0.18; g.fillRect(x0 + (i - from) * xw, y, xw + 0.6, h); }
+  g.globalAlpha = 1;
+}
+const LANES = [['hr', 'Heart rate', 30, 200, 0.5], ['temp', 'Temperature', 34.5, 40, 0.3], ['motion', 'Motion', 0, 1.3, 0.2]];
+function drawStrip() {
+  const [g, w, h] = sized($('strip')), from = Math.max(0, t - WIN + 1), xw = w / WIN;
+  let y = 0;
+  LANES.forEach(([k, label, lo, hi, frac], li) => {
+    const lh = h * frac; bands(g, 0, xw, y, lh, from, t + 1);
+    g.strokeStyle = css('--trace'); g.lineWidth = li ? 1.6 : 2; g.lineJoin = 'round'; g.beginPath();
+    for (let i = from; i <= t; i++) { const v = Math.min(hi, Math.max(lo, P[k][i])); const x = (i - from) * xw, yy = y + lh - 8 - (v - lo) / (hi - lo) * (lh - 22);
+      i === from ? g.moveTo(x, yy) : g.lineTo(x, yy); }
+    g.stroke();
+    const v = Math.min(hi, Math.max(lo, P[k][t])); g.fillStyle = css('--trace'); g.beginPath();   // write head
+    g.arc((t - from) * xw, y + lh - 8 - (v - lo) / (hi - lo) * (lh - 22), 4, 0, 7); g.fill();
+    g.fillStyle = css('--ink-2'); g.font = '600 13px Public Sans, sans-serif'; g.fillText(label, 8, y + 17);
+    y += lh;
+  });
+  // alert ticks
+  [['ai', 4], ['rule', h - 12]].forEach(([who, yy]) => P[who + '_alerts'].forEach(([i, c]) => {
+    if (i < from || i > t) return; const x = (i - from) * xw; g.fillStyle = color(c); g.fillRect(x - 1.5, yy, 3, 8);
+  }));
+}
+function drawOverview() {
+  const [g, w, h] = sized($('overview')), xw = w / N;
+  bands(g, 0, xw, 22, h - 44, 0, N);
+  g.strokeStyle = css('--ink-2'); g.lineWidth = 1; g.beginPath();
+  P.hr.forEach((v, i) => { const yy = 22 + (h - 44) * (1 - (Math.min(200, Math.max(30, v)) - 30) / 170); i ? g.lineTo(i * xw, yy) : g.moveTo(0, yy); }); g.stroke();
+  [['ai', 4], ['rule', h - 18]].forEach(([who, yy]) => P[who + '_alerts'].forEach(([i, c]) => {
+    const x = i * xw + 0.5; g.fillStyle = color(c); g.strokeStyle = color(c); g.lineWidth = 2;
+    if (P.label[i]) g.fillRect(x - 3, yy + 2, 6, 10); else g.strokeRect(x - 2, yy + 3, 5, 8);   // hollow = false alarm
+  }));
+  g.fillStyle = css('--ink-2'); g.font = '600 11px Public Sans, sans-serif'; g.fillText('AI', w - 18, 14); g.fillText('Rule', w - 30, h - 6);
+}
+function setState(el, c, flash) {
+  const box = $(el); box.className = 'verdict c' + c; box.querySelector('.state-text').textContent = NAMES[c];
+  box.querySelector('.state').className = 'state c' + c;
+  if (flash) { box.classList.remove('flash'); void box.offsetWidth; box.classList.add('flash'); }
+}
+let prev = {};
+function render(reset) {
+  drawStrip(); $('scrub').value = t;
+  $('hr').textContent = P.hr[t]; $('temp').textContent = P.temp[t].toFixed(1); $('motion').textContent = P.motion[t].toFixed(2);
+  const st = { 'v-ai': P.ai[t], 'v-rule': P.rule[t], 'v-truth': P.label[t] };
+  for (const k in st) { setState(k, st[k], !reset && prev[k] !== st[k]); } prev = st;
+  // log + tallies
+  const all = [...P.ai_alerts.map(a => ['AI', ...a]), ...P.rule_alerts.map(a => ['Rule', ...a])].filter(a => a[1] <= t).sort((a, b) => b[1] - a[1]);
+  const fa = who => all.filter(a => a[0] === who && !P.label[a[1]]).length;
+  $('t-ai').textContent = all.filter(a => a[0] === 'AI').length; $('t-ai-f').textContent = fa('AI');
+  $('t-rule').textContent = all.filter(a => a[0] === 'Rule').length; $('t-rule-f').textContent = fa('Rule');
+  const html = all.length ? all.slice(0, 60).map(([who, i, c]) => `<li class="c${c}"><time>${clock(i)}</time><span class="src">${who}</span>
+    <span class="state c${c}" style="font-size:16px"><span class="dot"></span>${NAMES[c]}</span>
+    ${P.label[i] ? '<span class="ok">True alarm</span>' : '<span class="bad">False alarm</span>'}</li>`).join('')
+    : '<li class="empty">No alerts yet. Both monitors wait for 3 abnormal windows in a row before alerting.</li>';
+  if ($('log').dataset.n != all.length) { $('log').innerHTML = html; $('log').dataset.n = all.length; }
+}
+function tick(now) {
+  if (playing && P) { acc += (now - last) / 1000 * (+$('speed').value / 10);
+    if (acc >= 1) { t = Math.min(N - 1, t + Math.floor(acc)); acc %= 1; render(); if (t === N - 1) setPlaying(false); } }
+  last = now; requestAnimationFrame(tick);
+}
+function setPlaying(v) { playing = v; $('play').textContent = v ? 'Pause' : 'Play'; $('play').setAttribute('aria-pressed', !v); }
+$('play').onclick = () => { if (t === N - 1) t = 5; setPlaying(!playing); };
+$('scrub').oninput = e => { t = +e.target.value; render(true); };
+addEventListener('resize', () => { drawOverview(); render(true); });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { drawOverview(); render(true); });
+
+// evaluation panel
+const M = RESULTS.models;
+$('models').innerHTML = Object.entries(M).map(([n, r]) => `<tr class="${n === RESULTS.best ? 'best' : ''}"><td>${n}${n === RESULTS.best ? ' (deployed)' : ''}</td>
+  <td>${(r.acc * 100).toFixed(1)}%</td><td>${r.macro_f1.toFixed(3)}</td><td>${r.false_alarms_per_hour.toFixed(1)}</td><td>${(r.critical_event_recall * 100).toFixed(0)}%</td></tr>`).join('');
+const ex = RESULTS.exercise, ps = RESULTS.persistence;
+$('facts').innerHTML = `<div><b>${(ex.rule_flagged * 100).toFixed(0)}% vs ${(ex.model_flagged * 100).toFixed(1)}%</b>healthy exercise flagged, rule vs AI</div>
+  <div><b>${ps.rule.false_alarms_per_hour.toFixed(1)} vs ${ps.model.false_alarms_per_hour.toFixed(1)}</b>false alarms per hour with 3-window persistence</div>
+  <div><b>${RESULTS.latency_ms_single.toFixed(1)} ms</b>per prediction, ${Math.round(RESULTS.model_kb)} KB model</div>`;
+
+setPlaying(playing); load(ids[0]); requestAnimationFrame(t0 => { last = t0; tick(t0); });
+</script>
+</body>
+</html>
