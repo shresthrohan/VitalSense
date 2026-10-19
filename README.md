@@ -4,7 +4,10 @@ A wearable-vitals monitor that classifies every 10-second sample of heart rate, 
 **NORMAL**, **WARNING**, **CRITICAL** or **SENSOR_FAULT**, and raises alerts only when the condition persists.
 It is compared against a textbook threshold rule on patients it never saw during training.
 
-![Dashboard](figures/dashboard.png)
+
+
+https://github.com/user-attachments/assets/7332b819-fb78-4998-ad65-891150b7faef
+
 
 ## Run it
 
